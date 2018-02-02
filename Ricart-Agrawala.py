@@ -1,118 +1,129 @@
 from collections import namedtuple
-from enum import enum
-import datetime
+from enum import Enum
+from datetime import datetime
 import threading
-import socket
-import json
-
-
-
-##################################################################################################################################
-# Daniels Mysteriska Notes                                                                                                       #
-##################################################################################################################################
-#Vissa saker kan vara redundanta, om du hittar något så skicka koden som är motsägande till mig på Discord
-#Om jag inte ser det direkt eller tar lite tid att svara så föröska kolla på något annat
-
-#Kom ihåg att python har bra documentation för saker så sök, sök, sök
-#Ändra hur mycket du vill det här är bara ideer jag hade
-
-#Tror att kruxet verkligen ligger i att lista ut hur meddelande ska gå runt sen så blir det ganska simpelt
+from socket import socket
 
 ##################################################################################################################################
 # Variabel deklarationer                                                                                                         #
 ##################################################################################################################################
-#En Enum för att märka olika typer av meddelande. du använder den så här verkar det som messageType.WANTED eller vilken du nu vill använda
-class stateTypes(Enum):
-    WANTED = 1
-    HELD = 2
-    REQUEST = 3
-    REPLY = 4
-    RELEASED = 5
+class procStates(Enum):
+    WANTED = 0
+    HELD = 1
+    RELEASED = 2
 
-#Kolla upp hur namedtuples, fungerar ungefär som en struct i c.
-#Hade ideen för dessa när vi började så vet inte om de blir så bra
-mutexState      =   namedtuple('State', 'state prio replylst')
-mutexPriority   =   namedtuple('Priority', 'timestamp pid')
-mutexMessage    =   namedtuple('Message', 'msgtype mutexname prio')
+class msgTypes(Enum):
+    REPLY = 0
+    REQUEST = 1
 
-#Använda denna för att se 
-stateTable =    {  
-                    'proc_a': mutexState(state = None, prio = None, replylst = None), 
-                    'proc_b': mutexState(state = None, prio = None, replylst = None),
-                    'proc_c': mutexState(state = None, prio = None, replylst = None)
+#class msgTypes(Enum):
+#    REQUEST = 0
+#    REPLY = 1
+
+#localInfo lagrar information om the locala processen
+localInfo =     { 
+                    'procName':         None,
+                    'procPID':          None,   
+                    'procState':        None,   
+                    'procTimestamp':    None,   
+                    'procAddr':         None,   
+                    'procRemotes':      None, 
                 }
 
-#Det här är en Dictionary, använder denna för att för att se hur det ligger till med de olika processerna, börjar med att alla requestar
-#Sen så uppdaterar vi den när de får ett lås, släpper ett lås, om de väntar på replies osv. Use case --> mutexQueue['proc_a'] 
-mutexQueue =   {   
-                    'proc_a': statetable['proc_a'], 
-                    'proc_b': statetable['proc_b'],
-                    'proc_c': statetable['proc_c']
-                }
+#mutexQueue =   {   
+#                    'proc_a': statetable['proc_a'], 
+#                    'proc_b': statetable['proc_b'],
+#                    'proc_c': statetable['proc_c']
+#                }
 
-#Kan eventuellt använda denna för att när vi vill skicka meddelande
-processAddress = {'proc_a': ('192.168.0.50', '8000'), 'proc_b': ('192.168.0.50', '8001'), 'proc_c': ('192.168.0.50', '8002')}
+defferedQueue = []  #Waiting to reply too
+replyQueue    = []  #Awaiting replies from
+messageListener      =   None
 
-#tänkte använda den här för att jämnföra mot ovanstående eller något.
-int n_nodes = 3
+remoteAddresseses = { }
 
+MAXRECV = 4096 #Amounts of bytes to receieve from a 
 
 ##################################################################################################################################
 #Auxillary funktioner                                                                                                            #
 ##################################################################################################################################
-#Kallar på denna först för att skicka request messages till alla andra processer och lite annat eventuellt.
-def MutexInit(ip, procport, procpid, procName):
+def MutexInit(localAddr, procPid, procName, remoteAddr, remoteName, numRemotes):
+    #Initalize the local process info
+    localInfo['procName']        = procName
+    localInfo['procPID']         = procPID
+    localInfo['procState']       = procStates.RELEASED
+    localInfo['procAddr']        = localAddr
+    localInfo['procRemotes']     = numRemotes
+
+    #splitting the remoteAddr and remoteName tuples into separate variables
+    remoteAddr1, remoteAddr2 = remoteAddr
+    remoteName1, remoteName2 = remoteName #Don't know if we need this
+
+    #Add the other two processes addresses to a dictionary for access later
+    remoteAddresses[remoteName1] = remoteAddr1
+    remoteAddresses[remoteName2] = remoteAddr2
+
+    #Create thread that is supposed to fork the messageListener function to run in the background 
+    msgThread = threading.Thread(target = messageListener, args = remoteAddresses)
 
 
-def UpdateMutexQueue():
-    
 ##################################################################################################################################
 # Meddelande funktioner                                                                                                          #
 ##################################################################################################################################
-#Den här tror jag vi kommer behöva för att skicka meddelande till andra processer.
 def SendMessage(addr, message):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect(addr)
-    s.send(message)
-    s.close()
+    sendingSocket = socket.socket(family=AF_INET, type=SOCK_STREAM) 
+    if not sendingSocket.connect(addr): return False  
+    sendingSocket.send(message)
+    sendingSocket.close()
 
-#Vet inte om vi kommer behöva den här.
-def MessageHandler():
-    request_socket = threading.thread
-    if requestmessage.msgtype == "request":
-        return 1
-    else return 0
-    replymessage = mutex_message()
-    if replymessage.msgtype == "reply":
-        return 1
-    else return 0
+    return True
+
+def MessageListener():
+    listeningSocket = socket(AF_INET, SOCK_STREAM)
+    listeningSocket.bind(procInfo[procAddr]) #Bind the socket to the local address
+    listeningSocket.listen(localInfo['procRemotes'])
+
+    while 1:
+        (clientSocket, addr) = listeningSocket.accept()
+        messageHandler(listeningSocket.recv(MAXRECV))
+
+def MessageHandler(remoteMessage):
+    if remoteMessage['type'] == msgTypes.REQUEST:
+        if remoteMessage['procInfo']['procTimestamp'] < localInfo['procTimestamp'] or localInfo['procState'] == procStates.HELD:
+            defferedQueue[remoteMessage['procInfo']['procName']] = remoteMessage['procInfo']['procName']
+        else:
+            message = { 'type': msgTypes.REPLY, 'procInfo': localInfo, 'mutex': mutex }
+            SendMessage(remoteMessage['procInfo']['procAddr'], message)
+    
+    if remoteMessage['type'] == msgTypes.REPLY:
+        replyQueue.remove(remoteMessage['procInfo']['procName'])
 
 ##################################################################################################################################
 # Mutex Funktioner                                                                                                               #
 ##################################################################################################################################
-#Borde inte behöva vara mer avancerad än så här.
-def MutexHeld():
-    for n in mutexQueue.items():
-        processName, state = n
-        if stateTable[processName].state == stateTypes.HELD:
-            return True
-        return False      
+     
 
-def GetMutexLock(mutex);
-    state = mutex_state(requested, datetime.datetime.now, None)
+def GetMutexLock(mutex):
+    procInfo['procState'] = procStates.WANTED
+    localInfo['procTimestamp'] = datetime.now #generate the timestamp for the message
+    requestMessage = { 'type': msgTypes.REQUEST, 'procInfo': localInfo, 'mutex': mutex }
+
+    #If we can't send any messages we assume that we are first and therefore can enter the section without any replies
+    for address in remoteAddresses:
+        if SendMessage(address, message): 
+            replyQueue.update(address) #Only add addresses to the replyQueue if we sent a request to someone.
+ 
+    while replyQueue > 0: pass #Wait for the replyQueue to empty before continuing
+    return True
+    
+    
+def ReleaseMutexLock(mutex):
+    procInfo['procState'] = procStates.RELEASED
+    replyMessage = { 'type': msgTypes.REPLY, 'procInfo': localInfo, 'mutex': mutex }
+    for address in replyQueue:
+        SendMessage(address, replyMessage)
+    
     return True
 
-    if condition:
-        return False
-
-#Uppdatera eget mutexstate och skicka meddelande till alla andra processer state i meddeleandet så att de också kan uppdatera
-def ReleaseMutexLock(mutex, pname):
-    mutexState(state = stateTypes.RELEASED, prio = None, replylst = None),
-    mutex_queue[pname] = 0
-    return True
-
-    if condition:
-        return false
-
-#Vette Fan
 def MutexExit():
+    return True
